@@ -1,0 +1,194 @@
+###############################################################################
+## Archive_Evt.ps1
+##=============================================================================
+## Object    : LastUpdateTime : Ce script permet la mise à jour de diverses valeurs WSUS chaque lundi matin en tache planifiée
+## Author    : CHALLET Olivier - 09 2020
+## Change	 : 
+## Version   : 1.0.3
+##=============================================================================
+##
+###############################################################################
+##
+## v1.0.0 Initial version
+## V1.0.1 Ajout de l'écriture dans la base de registre
+## V1.0.2 Ajout des valeurs ScheduledInstallDate & NextDetectionTime
+## V1.0.3 Ajout des logs pour nagios
+###############################################################################
+
+################# PARAMETERS ###################################################
+Param(
+	[String] $ScriptExecutionMode="NOEXECMODE",
+	[string] $UserTask="NOUSERTASK",
+	[string] $Parameter="NOPARAMETER")
+	
+################# VARIABLES ###################################################
+$ScriptName="LastUpdateTime"
+$ScriptEvtSource=$ScriptName + " Script"
+$ScriptVersion="1.0.3"
+$ScriptRepository=$env:ADMINSCRIPTS
+$ScriptDirectory="$ScriptRepository\$ScriptName"
+$SecurityDirectory="C:\Admin\Install\Security"
+$SecurityPwdDirectory="$SecurityDirectory\Pwd"
+$ScriptDateStamp=(get-date -uformat %Y%m%d_%Hh%M)
+$ScriptLogFile="$ScriptDirectory\Logs\$ScriptName-$ScriptDateStamp.log"
+$NagiosLogFile="$ScriptDirectory\Logs\$ScriptName.log"
+
+$CurrentUserName=[System.Security.Principal.WindowsIdentity]::GetCurrent().Name
+
+Function ScheduleScript {
+    Param( 
+	    $ScheduledTime,
+	    $ScheduledFrequency,
+	    # Valid schedule types: DAILY, WEEKLY, MONTHLY and ONCE
+	    $ScheduleDays,
+	    # Valid schedule days : 
+	    # When ONCE and Monthly : one value from this list : monday, tuesday, wednesday, thursday, friday, saturday, sunday
+	    # When Daily : one or more values from this list : monday, tuesday, wednesday, thursday, friday, saturday, sunday
+	    $CredentialsUser,
+        $ActionParam
+	    )
+
+    if (!($CredentialsUser -eq "SYSTEM")) {
+	    if ($Parameter -eq "NOPARAMETER") {
+		    $CredentialsSecuredPassword = Read-Host "Enter password for user $CredentialsUser " -AsSecureString
+	    } else {
+		    # Load Bytes array file
+		    $error.clear()
+		    . "$SecurityPwdDirectory\Bytes_array.ps1"
+		    if ($error.count -gt 0) {
+			    ExitScript 1 "ERROR - Unable to load bytes array file, script cannot be run !"
+		    }
+	    $CredentialsSecuredPassword = ConvertTo-SecureString -String $Parameter -Key $Bytes_Array
+	    }
+    $CredentialUnSecurePassword=(([Runtime.InteropServices.Marshal]::PtrToStringAuto([Runtime.InteropServices.Marshal]::SecureStringToBSTR($CredentialsSecuredPassword))))
+    }
+
+    if ($UserTask -eq "NOUSERTASK") {
+	    $CredentialsUserTask=$CredentialsUser
+    } else {
+	    $CredentialsUserTask=$UserTask
+    }
+    $error.clear()
+    $Action = New-ScheduledTaskAction -execute "powershell.exe" -argument $ActionParam -workingdirectory "$ScriptDirectory"
+
+    If ($ScheduledFrequency -like "daily") {
+	    $Trigger = New-ScheduledTaskTrigger -Daily -At $ScheduledTime -DaysOfWeek $ScheduleDays
+    }
+    If ($ScheduledFrequency -like "weekly") {
+	    $Trigger = New-ScheduledTaskTrigger -Weekly -At $ScheduledTime -DaysOfWeek $ScheduleDays
+    }
+    If ($ScheduledFrequency -like "monthly") {
+	    $Trigger = New-ScheduledTaskTrigger -Weekly -WeeksInterval 4 -At $ScheduledTime -DaysOfWeek $ScheduleDays
+    }
+    Write-Host $CredentialsUser
+    if (!($CredentialsUser -eq "SYSTEM")) {
+	    Register-ScheduledTask -TaskName $ScriptName -Trigger $Trigger -Action $Action -User $CredentialsUserTask -RunLevel 1 -Password $CredentialUnSecurePassword | Out-null
+    } else {
+	    Register-ScheduledTask -TaskName $ScriptName -Trigger $Trigger -Action $Action -User $CredentialsUser -RunLevel 1 | Out-null
+    }
+
+    if ($error.count -gt 0) {
+	    Write-Log "ERROR - Unable to schedule script"
+    } else {
+	    Write-Log "OK - Script successfully scheduled"
+    }
+    Write-Log " "
+}
+
+Function DisplayHelpOnScript {
+    Write-Host $ScriptName $ScriptVersion -ForegroundColor Green
+    Write-Host
+    Write-Host Description : Ce script permet la mise à jour de diverses valeurs WSUS chaque lundi matin en tache planifiée.
+    Write-Host
+    Write-Host Syntax :
+    Write-Host 
+    Write-Host $ScriptName        -> Display this Help -ForegroundColor Green
+    Write-Host 
+    Write-Host $ScriptName EXEC   -> Get Last Update Time value -ForegroundColor Green
+    Write-Host 
+    Write-Host $ScriptName SUBMIT -> Schedule a Last Update Time getting value -ForegroundColor Green
+    Write-Host
+    Write-Host 
+    Write-Host (get-date -uformat %I:%M:%S) "Missing parameter!" -ForegroundColor Red
+    Write-Host 
+}
+
+Function ExitScript {
+    param ( $ExitCode,$ErrorMsg )
+
+    if (-not ($ExitCode -eq 0)) {
+	    Write-Host
+	    Write-Host (get-date -uformat %I:%M:%S) ERROR : $ErrorMsg !!! -ForegroundColor red
+	    Write-Host
+	    Write-Log $ErrorMsg
+	    write "" | out-file $ScriptLogFile -Append -Encoding "ASCII"
+    }
+
+    set-psdebug -off
+    exit $ExitCode
+}
+
+Function Write-Log {
+    param ( $Msg )
+    $CurrentDate = (get-date).ToString()
+    write "$CurrentDate ($CurrentUserName) : $Msg" | out-file $ScriptLogFile -Append -Encoding "ASCII"
+}
+
+Function LastUpdateTime {
+    ##=============================================================================
+    ## WSUS - LAST SUCCESS TIME
+    ##=============================================================================
+    ## Recupération de la valeur LastSuccessTime depuis les EventLog, puis modification du typage, puis enregistrement en variable et en fichier txt
+    ($LastUpdateTime = (Get-WinEvent -LogName Setup | where{$_.message -match "success"} | select -First 1 -ExpandProperty TimeCreated).ToString("yyyy-MM-dd hh:mm:ss")) | Out-File -NoNewLine C:\Admin\Logs\LastUpdateTime.log
+    Write-Log "OK - Value LastUpdateTime is $LastUpdateTime"
+
+    # Inscription de la valeur dans la clé de registre qui va bien
+    Set-ItemProperty -Path "HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install" -Name "LastSuccessTime" -Value "$LastUpdateTime" -Force
+    Write-Log "OK - Value LastUpdateTime is Write on registry key HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\Results\Install\LastSuccessTime"
+
+    ##=============================================================================
+    ## WSUS - NEXT Detection Time
+    ##=============================================================================
+    ## Récupération de la valeur NextDetectionTime ScheduledInstallDate
+
+
+    ##=============================================================================
+    ## WSUS - NEXT Detection Time
+    ##=============================================================================
+    ## Récupération de la valeur ScheduledInstallDate
+
+
+    ##=============================================================================
+    ## End Script
+    ##=============================================================================
+    Write-Log " "
+    Write-Log "END SCRIPT $ScriptName"
+}
+
+################# SCRIPT BODY ##################################################
+Write-Host $ScriptName $ScriptVersion -ForegroundColor Green
+Write-Host
+Write-Host Script launched in $ScriptExecutionMode Mode...
+Write-Host
+
+Write-Log "BEGIN SCRIPT $ScriptName"
+Write-Log " "
+
+if ($ScriptExecutionMode -eq "EXEC") {
+	LastUpdateTime
+	# Generate log for Nagios
+	Copy-Item $ScriptLogFile $NagiosLogFile
+} else {
+	if ($ScriptExecutionMode -eq "SUBMIT") {
+    
+	ScheduleScript "07:25" "Weekly" "Monday" "SYSTEM" "-NoLogo -NonInteractive -file $ScriptDirectory\$ScriptName.ps1 EXEC"
+	} else {
+		DisplayHelpOnScript
+	}
+}
+
+write "" | out-file $ScriptLogFile -Append -Encoding "ASCII"
+set-psdebug -off
+
+Write-Host Results can be found in log file : $ScriptLogFile -ForegroundColor Green
+Write-Host
