@@ -3,7 +3,7 @@
 ##=============================================================================
 ## Object    : LastUpdateTime : Ce script permet la mise à jour de diverses valeurs WSUS chaque lundi matin en tache planifiée
 ## Author    : CHALLET Olivier - 09 2020
-## Change	 : 
+## Change    : 
 ## Version   : 1.0.3
 ##=============================================================================
 ##
@@ -12,7 +12,7 @@
 ## v1.0.0 Initial version
 ## V1.0.1 Ajout de l'écriture dans la base de registre
 ## V1.0.2 Ajout des valeurs ScheduledInstallDate & NextDetectionTime
-## V1.0.3 Ajout des logs pour nagios
+## V1.0.3 Ajout de la gestion des logs dans un fichier, pour supervision Nagios
 ###############################################################################
 
 ################# PARAMETERS ###################################################
@@ -25,10 +25,8 @@ Param(
 $ScriptName="LastUpdateTime"
 $ScriptEvtSource=$ScriptName + " Script"
 $ScriptVersion="1.0.3"
-$ScriptRepository=$env:ADMINSCRIPTS
+$ScriptRepository="C:\Admin\Scripts"
 $ScriptDirectory="$ScriptRepository\$ScriptName"
-$SecurityDirectory="C:\Admin\Install\Security"
-$SecurityPwdDirectory="$SecurityDirectory\Pwd"
 $ScriptDateStamp=(get-date -uformat %Y%m%d_%Hh%M)
 $ScriptLogFile="$ScriptDirectory\Logs\$ScriptName-$ScriptDateStamp.log"
 $NagiosLogFile="$ScriptDirectory\Logs\$ScriptName.log"
