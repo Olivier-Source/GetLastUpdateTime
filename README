@@ -1,0 +1,3 @@
+Ce script permet la récupération des valeurs WSUS sur les serveurs Windows 2016 qui ont été supprimés par Microsoft
+Pour le lancement du script, je vous propose simplement de le mettre dans un dossier nommé : C:/Admin/Scripts/LastUpdateTime/
+et de créer aussi un dossier "Logs" dans ce même dossier pour avoir le resultat suivant : C:/Admin/Scripts/LastUpdateTime/Logs
